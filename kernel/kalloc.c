@@ -10,7 +10,9 @@
 #include "spinlock.h"
 
 void freerange(void *vstart, void *vend);
-extern char end[]; // first address after kernel loaded from ELF file
+// first address after kernel loaded from ELF file
+// its in kernel.ld and is a va
+extern char end[];
 
 struct run {
   struct run *next;
@@ -42,11 +44,14 @@ kinit2(void *vstart, void *vend)
   kmem.use_lock = 1;
 }
 
+// vm of vstart to vend should have been mapped
+// or writing struct run to the memory wont work
 void
 freerange(void *vstart, void *vend)
 {
   char *p;
-  p = (char*)PGROUNDUP((uint)vstart);
+  // changed to uint64
+  p = (char*)PGROUNDUP((uint64)vstart);
   for(; p + PGSIZE <= (char*)vend; p += PGSIZE)
     kfree(p);
 }
@@ -61,7 +66,8 @@ kfree(char *v)
 {
   struct run *r;
 
-  if((uint)v % PGSIZE || v < end || v2p(v) >= PHYSTOP)
+  // changed to uint64
+  if((uint64)v % PGSIZE || v < end || v2p(v) >= PHYSTOP)
     panic("kfree");
 
   // Fill with junk to catch dangling refs.

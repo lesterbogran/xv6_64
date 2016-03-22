@@ -1,4 +1,10 @@
 // Routines to let C code use special x86 instructions.
+// Usage of inline assembly:
+//     asm ( assembler template
+//            : output operands                  /* optional */
+//            : input operands                   /* optional */
+//            : list of clobbered registers      /* optional */
+//            );
 
 static inline uchar
 inb(ushort port)
@@ -62,11 +68,15 @@ struct segdesc;
 static inline void
 lgdt(struct segdesc *p, int size)
 {
-  volatile ushort pd[3];
+// this has to be changed because page directory changes in x64
+  volatile ushort pd[5];
 
+// also uint changed to uint64 which is unsigned long
   pd[0] = size-1;
-  pd[1] = (uint)p;
-  pd[2] = (uint)p >> 16;
+  pd[1] = (uint64)p;
+  pd[2] = (uint64)p >> 16;
+  pd[3] = (uint64)p >> 32;
+  pd[4] = (uint64)p >> 48;
 
   asm volatile("lgdt (%0)" : : "r" (pd));
 }
@@ -76,11 +86,14 @@ struct gatedesc;
 static inline void
 lidt(struct gatedesc *p, int size)
 {
-  volatile ushort pd[3];
+  // same with lgdt
+  volatile ushort pd[5];
 
   pd[0] = size-1;
-  pd[1] = (uint)p;
-  pd[2] = (uint)p >> 16;
+  pd[1] = (uint64)p;
+  pd[2] = (uint64)p >> 16;
+  pd[3] = (uint64)p >> 32;
+  pd[4] = (uint64)p >> 48;
 
   asm volatile("lidt (%0)" : : "r" (pd));
 }
@@ -91,11 +104,12 @@ ltr(ushort sel)
   asm volatile("ltr %0" : : "r" (sel));
 }
 
-static inline uint
+static inline uint64
 readeflags(void)
 {
-  uint eflags;
-  asm volatile("pushfl; popl %0" : "=r" (eflags));
+// eflags also gets longer so use pushf instead of pushfl etc.
+  uint64 eflags;
+  asm volatile("pushf; pop %0" : "=r" (eflags));
   return eflags;
 }
 
@@ -118,66 +132,63 @@ sti(void)
 }
 
 static inline uint
-xchg(volatile uint *addr, uint newval)
+xchg(volatile uint *addr, uint64 newval)
 {
   uint result;
 
   // The + in "+m" denotes a read-modify-write operand.
-  asm volatile("lock; xchgl %0, %1" :
+  asm volatile("lock; xchg %0, %1" :
                "+m" (*addr), "=a" (result) :
                "1" (newval) :
                "cc");
   return result;
 }
 
-static inline uint
+// no movl for you!
+static inline uint64
 rcr2(void)
 {
-  uint val;
-  asm volatile("movl %%cr2,%0" : "=r" (val));
+  uint64 val;
+  asm volatile("mov %%cr2,%0" : "=r" (val));
   return val;
 }
 
 static inline void
-lcr3(uint val)
+lcr3(uint64 val)
 {
-  asm volatile("movl %0,%%cr3" : : "r" (val));
+  asm volatile("mov %0,%%cr3" : : "r" (val));
 }
+
+// defined in entry.S
+void
+wrmsr(uint msr, uint64 val);
 
 //PAGEBREAK: 36
 // Layout of the trap frame built on the stack by the
 // hardware and by trapasm.S, and passed to trap().
 struct trapframe {
-  // registers as pushed by pusha
-  uint edi;
-  uint esi;
-  uint ebp;
-  uint oesp;      // useless & ignored
-  uint ebx;
-  uint edx;
-  uint ecx;
-  uint eax;
+  uint64 rax;      // rax
+  uint64 rbx;
+  uint64 rcx;
+  uint64 rdx;
+  uint64 rbp;
+  uint64 rsi;
+  uint64 rdi;
+  uint64 r8;
+  uint64 r9;
+  uint64 r10;
+  uint64 r11;
+  uint64 r12;
+  uint64 r13;
+  uint64 r14;
+  uint64 r15;
 
-  // rest of trap frame
-  ushort gs;
-  ushort padding1;
-  ushort fs;
-  ushort padding2;
-  ushort es;
-  ushort padding3;
-  ushort ds;
-  ushort padding4;
-  uint trapno;
+  uint64 trapno;
+  uint64 err;
 
-  // below here defined by x86 hardware
-  uint err;
-  uint eip;
-  ushort cs;
-  ushort padding5;
-  uint eflags;
-
-  // below here only when crossing rings, such as from user to kernel
-  uint esp;
-  ushort ss;
-  ushort padding6;
+  uint64 rip;
+  uint64 cs;
+  uint64 rflags;
+  uint64 rsp;
+  uint64 ss;
 };

@@ -10,7 +10,7 @@
 
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
-extern uint vectors[];  // in vectors.S: array of 256 entry pointers
+extern void* vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
@@ -74,7 +74,7 @@ trap(struct trapframe *tf)
   case T_IRQ0 + 7:
   case T_IRQ0 + IRQ_SPURIOUS:
     cprintf("cpu%d: spurious interrupt at %x:%x\n",
-            cpu->id, tf->cs, tf->eip);
+            cpu->id, tf->cs, tf->rip);
     lapiceoi();
     break;
 
@@ -82,14 +82,14 @@ trap(struct trapframe *tf)
   default:
     if(proc == 0 || (tf->cs&3) == 0){
       // In kernel, it must be our mistake.
-      cprintf("unexpected trap %d from cpu %d eip %x (cr2=0x%x)\n",
-              tf->trapno, cpu->id, tf->eip, rcr2());
+      cprintf("unexpected trap %d from cpu %d rip %p (cr2=0x%p) err=%p\n",
+              tf->trapno, cpu->id, tf->rip, rcr2(), tf->err);
       panic("trap");
     }
     // In user space, assume process misbehaved.
     cprintf("pid %d %s: trap %d err %d on cpu %d "
-            "eip 0x%x addr 0x%x--kill proc\n",
-            proc->pid, proc->name, tf->trapno, tf->err, cpu->id, tf->eip,
+            "rip 0x%p addr 0x%p--kill proc\n",
+            proc->pid, proc->name, tf->trapno, tf->err, cpu->id, tf->rip,
             rcr2());
     proc->killed = 1;
   }

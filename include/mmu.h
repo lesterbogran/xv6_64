@@ -1,5 +1,8 @@
-// This file contains definitions for the 
+// This file contains definitions for the
 // x86 memory management unit (MMU).
+
+// MSR registers ID
+#define FS_BAS          0xc0000100      // ID of FS_Base
 
 // Eflags register
 #define FL_CF           0x00000001      // Carry Flag
@@ -38,6 +41,7 @@
 #define CR0_PG          0x80000000      // Paging
 
 #define CR4_PSE         0x00000010      // Page size extension
+#define CR4_PAE         0x00000020      // Physical address extension
 
 #define SEG_KCODE 1  // kernel code
 #define SEG_KDATA 2  // kernel data+stack
@@ -59,21 +63,30 @@ struct segdesc {
   uint p : 1;          // Present
   uint lim_19_16 : 4;  // High bits of segment limit
   uint avl : 1;        // Unused (available for software use)
-  uint rsv1 : 1;       // Reserved
+  uint l : 1;          // 1 = 64-bit code segment, db must be 0 if set
   uint db : 1;         // 0 = 16-bit segment, 1 = 32-bit segment
   uint g : 1;          // Granularity: limit scaled by 4K when set
   uint base_31_24 : 8; // High bits of segment base address
 };
 
 // Normal segment
-#define SEG(type, base, lim, dpl) (struct segdesc)    \
-{ ((lim) >> 12) & 0xffff, (uint)(base) & 0xffff,      \
-  ((uint)(base) >> 16) & 0xff, type, 1, dpl, 1,       \
-  (uint)(lim) >> 28, 0, 0, 1, 1, (uint)(base) >> 24 }
-#define SEG16(type, base, lim, dpl) (struct segdesc)  \
-{ (lim) & 0xffff, (uint)(base) & 0xffff,              \
-  ((uint)(base) >> 16) & 0xff, type, 1, dpl, 1,       \
-  (uint)(lim) >> 16, 0, 0, 1, 0, (uint)(base) >> 24 }
+#define SEG_TSS64(base, lim, dpl) (struct segdesc)      \
+{ (lim) & 0xffff, (uint64)(base) & 0xffff,              \
+  ((uint64)(base) >> 16) & 0xff, 0x9, 0, dpl, 1,        \
+  (uint64)(lim) >> 16, 0, 0, 0, 0, (uint64)(base) >> 24 }
+
+#define SEG_CODE64(type, dpl) (struct segdesc)          \
+{ 0, 0, 0, type, 1, dpl, 1, 0, 0, 1, 0, 1, 0 }
+
+#define SEG(type, base, lim, dpl) (struct segdesc)      \
+{ ((lim) >> 12) & 0xffff, (uint64)(base) & 0xffff,      \
+  ((uint64)(base) >> 16) & 0xff, type, 1, dpl, 1,       \
+  (uint64)(lim) >> 28, 0, 0, 1, 1, (uint64)(base) >> 24 }
+
+#define SEG16(type, base, lim, dpl) (struct segdesc)    \
+{ (lim) & 0xffff, (uint64)(base) & 0xffff,              \
+  ((uint64)(base) >> 16) & 0xff, type, 1, dpl, 1,       \
+  (uint64)(lim) >> 16, 0, 0, 1, 0, (uint64)(base) >> 24 }
 #endif
 
 #define DPL_USER    0x3     // User DPL
@@ -100,36 +113,44 @@ struct segdesc {
 #define STS_IG32    0xE     // 32-bit Interrupt Gate
 #define STS_TG32    0xF     // 32-bit Trap Gate
 
-// A virtual address 'la' has a three-part structure as follows:
+// A virtual address 'la' has a five-part structure as follows:
 //
-// +--------10------+-------10-------+---------12----------+
-// | Page Directory |   Page Table   | Offset within Page  |
-// |      Index     |      Index     |                     |
-// +----------------+----------------+---------------------+
-//  \--- PDX(va) --/ \--- PTX(va) --/
+// +-----16----+----9----+----9----+----9----+----9----+----12-----+
+// | Canonical |  PML4   |  PDPT   | PageDir | PageTbl |  Offset   |
+// | sign-extd |  Index  |  Index  |  Index  |  Index  |           |
+// +-----------+---------+---------+---------+---------+-----------+
+//              \PML4() / \PDPTX()/ \PDX(va)/ \PTX(va)/
 
 // page directory index
-#define PDX(va)         (((uint)(va) >> PDXSHIFT) & 0x3FF)
-
+#define PDX(va)         (((uint64)(va) >> PDXSHIFT) & 0x1FF)
 // page table index
-#define PTX(va)         (((uint)(va) >> PTXSHIFT) & 0x3FF)
+#define PTX(va)         (((uint64)(va) >> PTXSHIFT) & 0x1FF)
+// PDPT index
+#define PDPTX(va)       (((uint64)(va) >> PDPTXSHIFT) & 0x1FF)
+// PML4 index
+#define PML4X(va)       (((uint64)(va) >> PML4XSHIFT) & 0x1FF)
 
 // construct virtual address from indexes and offset
-#define PGADDR(d, t, o) ((uint)((d) << PDXSHIFT | (t) << PTXSHIFT | (o)))
+#define PGADDR(l4, l3, d, t, o)  \
+  ((uint64)((l4) << PML4XSHIFT | (l3) << PDPTXSHIFT | (d) << PDXSHIFT | (t) << PTXSHIFT | (o)))
 
 // Page directory and page table constants.
-#define NPDENTRIES      1024    // # directory entries per page directory
-#define NPTENTRIES      1024    // # PTEs per page table
-#define PGSIZE          4096    // bytes mapped by a page
+#define NPML4ENTRIES    512     // # PDPTs per PML4E
+#define NPDPTENTRIES    512     // # page directories per PDPTE
+#define NPDENTRIES      512     // # directory entries per page directory
+#define NPTENTRIES      512     // # PTEs per page table
+#define PGSIZE          4096    // bytes mapped by a page (4kB)
 
 #define PGSHIFT         12      // log2(PGSIZE)
 #define PTXSHIFT        12      // offset of PTX in a linear address
-#define PDXSHIFT        22      // offset of PDX in a linear address
+#define PDXSHIFT        21      // offset of PDX in a linear address
+#define PDPTXSHIFT      30      // offset of PDPTX in a linear address
+#define PML4XSHIFT      39      // offset of PML4X in a linear address
 
 #define PGROUNDUP(sz)  (((sz)+PGSIZE-1) & ~(PGSIZE-1))
 #define PGROUNDDOWN(a) (((a)) & ~(PGSIZE-1))
 
-// Page table/directory entry flags.
+// PML4/PDPT/Page table/directory entry flags.
 #define PTE_P           0x001   // Present
 #define PTE_W           0x002   // Writeable
 #define PTE_U           0x004   // User
@@ -140,50 +161,26 @@ struct segdesc {
 #define PTE_PS          0x080   // Page Size
 #define PTE_MBZ         0x180   // Bits must be zero
 
-// Address in page table or page directory entry
-#define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)
-#define PTE_FLAGS(pte)  ((uint)(pte) &  0xFFF)
+// Address in PML4 or PDPT or PD or PT entry
+#define PTE_ADDR(pte)   ((uint64)(pte) & ~0xFFF)
+#define PTE_FLAGS(pte)  ((uint64)(pte) & 0xFFF)
 
 #ifndef __ASSEMBLER__
-typedef uint pte_t;
-
 // Task state segment format
 struct taskstate {
-  uint link;         // Old ts selector
-  uint esp0;         // Stack pointers and segment selectors
-  ushort ss0;        //   after an increase in privilege level
-  ushort padding1;
-  uint *esp1;
-  ushort ss1;
-  ushort padding2;
-  uint *esp2;
-  ushort ss2;
-  ushort padding3;
-  void *cr3;         // Page directory base
-  uint *eip;         // Saved state from last task switch
-  uint eflags;
-  uint eax;          // More saved state (registers)
-  uint ecx;
-  uint edx;
-  uint ebx;
-  uint *esp;
-  uint *ebp;
-  uint esi;
-  uint edi;
-  ushort es;         // Even more saved state (segment selectors)
-  ushort padding4;
-  ushort cs;
-  ushort padding5;
-  ushort ss;
-  ushort padding6;
-  ushort ds;
-  ushort padding7;
-  ushort fs;
-  ushort padding8;
-  ushort gs;
-  ushort padding9;
-  ushort ldt;
-  ushort padding10;
+  uint32 padding0;
+  uint64 rsp0;
+  uint64 rsp1;
+  uint64 rsp2;
+  uint64 padding1;
+  uint64 ist_rsp1;
+  uint64 ist_rsp2;
+  uint64 ist_rsp3;
+  uint64 ist_rsp4;
+  uint64 ist_rsp5;
+  uint64 ist_rsp6;
+  uint64 ist_rsp7;
+  uint64 padding2;
   ushort t;          // Trap on task switch
   ushort iomb;       // I/O map base address
 };
@@ -200,6 +197,8 @@ struct gatedesc {
   uint dpl : 2;         // descriptor(meaning new) privilege level
   uint p : 1;           // Present
   uint off_31_16 : 16;  // high bits of offset in segment
+  uint off_63_32 : 32;  // higher bits in x64
+  uint rsv : 32;        // reserved
 };
 
 // Set up a normal interrupt/trap gate descriptor.
@@ -212,7 +211,7 @@ struct gatedesc {
 //        this interrupt/trap gate explicitly using an int instruction.
 #define SETGATE(gate, istrap, sel, off, d)                \
 {                                                         \
-  (gate).off_15_0 = (uint)(off) & 0xffff;                \
+  (gate).off_15_0 = (uint64)(off) & 0xffff;               \
   (gate).cs = (sel);                                      \
   (gate).args = 0;                                        \
   (gate).rsv1 = 0;                                        \
@@ -220,7 +219,9 @@ struct gatedesc {
   (gate).s = 0;                                           \
   (gate).dpl = (d);                                       \
   (gate).p = 1;                                           \
-  (gate).off_31_16 = (uint)(off) >> 16;                  \
+  (gate).off_31_16 = ((uint64)(off) >> 16) & 0xffff;      \
+  (gate).off_63_32 = (uint64)(off) >> 32;                 \
+  (gate).rsv = 0;                                         \
 }
 
 #endif

@@ -3,7 +3,8 @@
 
 // Per-CPU state
 struct cpu {
-  uchar id;                    // Local APIC ID; index into cpus[] below
+  uchar id;                    // index into cpus[] below
+  uchar apicid;                // Local APIC ID
   struct context *scheduler;   // swtch() here to enter scheduler
   struct taskstate ts;         // Used by x86 to find stack for interrupt
   struct segdesc gdt[NSEGS];   // x86 global descriptor table
@@ -12,8 +13,7 @@ struct cpu {
   int intena;                  // Were interrupts enabled before pushcli?
 
   // Cpu-local storage variables; see below
-  struct cpu *cpu;
-  struct proc *proc;           // The currently-running process.
+  void *local;
 };
 
 extern struct cpu cpus[NCPU];
@@ -27,8 +27,8 @@ extern int ncpu;
 // holding those two variables in the local cpu's struct cpu.
 // This is similar to how thread-local variables are implemented
 // in thread libraries such as Linux pthreads.
-extern struct cpu *cpu asm("%gs:0");       // &cpus[cpunum()]
-extern struct proc *proc asm("%gs:4");     // cpus[cpunum()].proc
+extern __thread struct cpu *cpu;
+extern __thread struct proc *proc;
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.
@@ -41,20 +41,25 @@ extern struct proc *proc asm("%gs:4");     // cpus[cpunum()].proc
 // The layout of the context matches the layout of the stack in swtch.S
 // at the "Switch stacks" comment. Switch doesn't save eip explicitly,
 // but it is on the stack and allocproc() manipulates it.
+
+// of course this changes in 64bit...
 struct context {
-  uint edi;
-  uint esi;
-  uint ebx;
-  uint ebp;
-  uint eip;
+  uint64 r15;
+  uint64 r14;
+  uint64 r13;
+  uint64 r12;
+  uint64 r11;
+  uint64 rbx;
+  uint64 rbp;
+  uint64 rip;
 };
 
 enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
 struct proc {
-  uint sz;                     // Size of process memory (bytes)
-  pde_t* pgdir;                // Page table
+  uint64 sz;                   // Size of process memory (bytes)
+  pml4e_t* pml4;                // Page table
   char *kstack;                // Bottom of kernel stack for this process
   enum procstate state;        // Process state
   volatile int pid;            // Process ID

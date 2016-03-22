@@ -730,7 +730,7 @@ concreate(void)
     file[1] = '0' + i;
     pid = fork();
     if(pid < 0){
-      printf(1, "fork failed\n");
+      printf(1, "fork failed i = %d\n", i);
       exit();
     }
     if(((i % 3) == 0 && pid == 0) ||
@@ -1452,13 +1452,13 @@ void
 validateint(int *p)
 {
   int res;
-  asm("mov %%esp, %%ebx\n\t"
-      "mov %3, %%esp\n\t"
+  asm("mov %%rsp, %%rbx\n\t"
+      "mov %3, %%rsp\n\t"
       "int %2\n\t"
-      "mov %%ebx, %%esp" :
+      "mov %%rbx, %%rsp" :
       "=a" (res) :
       "a" (SYS_sleep), "n" (T_SYSCALL), "c" (p) :
-      "ebx");
+      "rbx");
 }
 
 void
@@ -1610,11 +1610,11 @@ main(int argc, char *argv[])
 {
   printf(1, "usertests starting\n");
 
-  if(open("usertests.ran", 0) >= 0){
-    printf(1, "already ran user tests -- rebuild fs.img\n");
-    exit();
-  }
-  close(open("usertests.ran", O_CREATE));
+  // if(open("usertests.ran", 0) >= 0){
+  //   printf(1, "already ran user tests -- rebuild fs.img\n");
+  //   exit();
+  // }
+  // close(open("usertests.ran", O_CREATE));
 
   bigargtest();
   bigwrite();

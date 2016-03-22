@@ -122,7 +122,8 @@ void            swtch(struct context**, struct context*);
 
 // spinlock.c
 void            acquire(struct spinlock*);
-void            getcallerpcs(void*, uint*);
+void            getcallerpcs(void*, uint64*);
+void            getstackpcs(uint64*, uint64*);
 int             holding(struct spinlock*);
 void            initlock(struct spinlock*, char*);
 void            release(struct spinlock*);
@@ -142,8 +143,9 @@ char*           strncpy(char*, const char*, int);
 int             argint(int, int*);
 int             argptr(int, char**, int);
 int             argstr(int, char**);
-int             fetchint(uint, int*);
-int             fetchstr(uint, char**);
+int             arguint64(int, uint64*);
+int             fetchuint64(uint64, uint64*);
+int             fetchstr(uint64, char**);
 void            syscall(void);
 
 // timer.c
@@ -153,7 +155,7 @@ void            timerinit(void);
 void            idtinit(void);
 extern uint     ticks;
 void            tvinit(void);
-extern struct spinlock tickslock;
+extern struct   spinlock tickslock;
 
 // uart.c
 void            uartinit(void);
@@ -164,18 +166,20 @@ void            uartputc(int);
 void            seginit(void);
 void            kvmalloc(void);
 void            vmenable(void);
-pde_t*          setupkvm(void);
-char*           uva2ka(pde_t*, char*);
-int             allocuvm(pde_t*, uint, uint);
-int             deallocuvm(pde_t*, uint, uint);
-void            freevm(pde_t*);
-void            inituvm(pde_t*, char*, uint);
-int             loaduvm(pde_t*, char*, struct inode*, uint, uint);
-pde_t*          copyuvm(pde_t*, uint);
+pml4e_t*        setupkvm(void);
+char*           uva2ka(pml4e_t*, char*);
+int             allocuvm(pml4e_t*, uint64, uint64);
+int             deallocuvm(pml4e_t*, uint64, uint64);
+void            freevm(pml4e_t*);
+void            freepdpt(pdpte_t*);
+void            freepgdir(pde_t*);
+void            inituvm(pml4e_t*, char*, uint);
+int             loaduvm(pml4e_t*, char*, struct inode*, uint, uint);
+pml4e_t*        copyuvm(pml4e_t*, uint);
 void            switchuvm(struct proc*);
 void            switchkvm(void);
-int             copyout(pde_t*, uint, void*, uint);
-void            clearpteu(pde_t *pgdir, char *uva);
+int             copyout(pml4e_t*, uint, void*, uint);
+void            clearpteu(pml4e_t *pgdir, char *uva);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

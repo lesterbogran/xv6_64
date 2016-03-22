@@ -15,11 +15,11 @@
 
 // Fetch the int at addr from the current process.
 int
-fetchint(uint addr, int *ip)
+fetchuint64(uint64 addr, uint64 *ip)
 {
-  if(addr >= proc->sz || addr+4 > proc->sz)
+  if(addr >= proc->sz || addr+sizeof(uint64) > proc->sz)
     return -1;
-  *ip = *(int*)(addr);
+  *ip = *(uint64*)(addr);
   return 0;
 }
 
@@ -27,7 +27,7 @@ fetchint(uint addr, int *ip)
 // Doesn't actually copy the string - just sets *pp to point at it.
 // Returns length of string, not including nul.
 int
-fetchstr(uint addr, char **pp)
+fetchstr(uint64 addr, char **pp)
 {
   char *s, *ep;
 
@@ -41,12 +41,41 @@ fetchstr(uint addr, char **pp)
   return -1;
 }
 
-// Fetch the nth 32-bit system call argument.
+// this is a call convention
+static uint64
+fetcharg(int n)
+{
+  switch (n) {
+    case 0: return proc->tf->rdi;
+    case 1: return proc->tf->rsi;
+    case 2: return proc->tf->rdx;
+    case 3: return proc->tf->rcx;
+    case 4: return proc->tf->r8;
+    case 5: return proc->tf->r9;
+  }
+  return 0;
+}
+
 int
 argint(int n, int *ip)
 {
-  return fetchint(proc->tf->esp + 4 + 4*n, ip);
+  *ip = fetcharg(n);
+  return 0;
 }
+
+int
+arguint64(int n, uint64 *ip)
+{
+  *ip = fetcharg(n);
+  return 0;
+}
+
+// Fetch the nth 32-bit system call argument.
+// int
+// argint(int n, int *ip)
+// {
+//   return fetchint(proc->tf->esp + 4 + 4*n, ip);
+// }
 
 // Fetch the nth word-sized system call argument as a pointer
 // to a block of memory of size n bytes.  Check that the pointer
@@ -54,11 +83,11 @@ argint(int n, int *ip)
 int
 argptr(int n, char **pp, int size)
 {
-  int i;
+  uint64 i;
 
-  if(argint(n, &i) < 0)
+  if(arguint64(n, &i) < 0)
     return -1;
-  if((uint)i >= proc->sz || (uint)i+size > proc->sz)
+  if(i >= proc->sz || i+size > proc->sz)
     return -1;
   *pp = (char*)i;
   return 0;
@@ -71,8 +100,8 @@ argptr(int n, char **pp, int size)
 int
 argstr(int n, char **pp)
 {
-  int addr;
-  if(argint(n, &addr) < 0)
+  uint64 addr;
+  if(arguint64(n, &addr) < 0)
     return -1;
   return fetchstr(addr, pp);
 }
@@ -128,12 +157,13 @@ syscall(void)
 {
   int num;
 
-  num = proc->tf->eax;
+// register name...
+  num = proc->tf->rax;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    proc->tf->eax = syscalls[num]();
+    proc->tf->rax = syscalls[num]();
   } else {
     cprintf("%d %s: unknown sys call %d\n",
             proc->pid, proc->name, num);
-    proc->tf->eax = -1;
+    proc->tf->rax = -1;
   }
 }
