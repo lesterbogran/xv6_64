@@ -70,7 +70,15 @@ struct segdesc {
 };
 
 // Normal segment
-#define SEG_TSS64(base, lim, dpl) (struct segdesc)      \
+#define SEG_NULL (struct segdesc)                       \
+{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+
+#define SEG_TSS64_L(base, lim, dpl) (struct segdesc)      \
+{ (lim) & 0xffff, (uint64)(base) & 0xffff,              \
+  ((uint64)(base) >> 16) & 0xff, 0x9, 0, dpl, 1,        \
+  (uint64)(lim) >> 16, 0, 0, 0, 0, (uint64)(base) >> 24 }
+
+#define SEG_TSS64_H(base) (struct segdesc)      \
 { (lim) & 0xffff, (uint64)(base) & 0xffff,              \
   ((uint64)(base) >> 16) & 0xff, 0x9, 0, dpl, 1,        \
   (uint64)(lim) >> 16, 0, 0, 0, 0, (uint64)(base) >> 24 }
